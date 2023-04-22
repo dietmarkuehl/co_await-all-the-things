@@ -73,11 +73,31 @@ concept is_awaiter
     = requires() { [](T t)->is_awaiter_test { co_await t; }; }
     ;
 
+template <typename R = void>
 struct task {
-    struct promise_type {
+    template <typename V>
+    struct base {
+        std::optional<V> v;
+        void return_value(auto&& r) { v = r; }
+        V value() { return *v; }
+    };
+    template <>
+    struct base<void> {
+        void return_void() {}
+        void value() {}
+    };
+
+    struct promise_type: base<R> {
         std::coroutine_handle<> continuation{std::noop_coroutine()};
         std::exception_ptr error{};
-        track t{"****  task"};
+        // track t{"****  task"};
+
+        R value() {
+            if (error) {
+                std::rethrow_exception(error);
+            }
+            return base<R>::value();
+        }
 
         struct final_awaiter: std::suspend_always {
             promise_type* promise;
@@ -107,18 +127,17 @@ struct task {
     void start() {
         auto h= std::coroutine_handle<promise_type>::from_promise(*promise);
         h.resume();
-
     }
+    R value() { return promise->value(); }
 
     struct nested_awaiter {
         promise_type* promise;
         bool await_ready() const { return false; }
-        void await_suspend(std::coroutine_handle<> continuation) {
-            std::cout << "nest::await_suspend\n";
+        std::coroutine_handle<> await_suspend(std::coroutine_handle<> continuation) {
             promise->continuation = continuation;
-            std::coroutine_handle<promise_type>::from_promise(*promise).resume();
+            return std::coroutine_handle<promise_type>::from_promise(*promise);
         }
-        void await_resume() {}
+        R await_resume() { return promise->value(); }
     };
     nested_awaiter operator co_await() { return nested_awaiter{promise.get()}; }
 };
@@ -158,15 +177,20 @@ int to_be_made_async() {
     return 17;
 }
 
-task g(io& c) {
-    std::cout << "second=" << co_await async_read{c, 1} << "\n";
-    std::cout << "third=" << co_await async_read{c, 1} << "\n";
+task<std::string> g(io& c) {
+    co_return co_await async_read{c, 1};
 }
 
-task f(io& c) {
-    std::cout << "first=" << co_await async_read{c, 1} << "\n";
+task<> e() {
+    throw std::runtime_error("exception from task");
+    co_return;
+}
+
+task<> f(io& c) {
     std::cout << "value=" << co_await to_be_made_async() << "\n";
-    co_await g(c);
+    std::cout << "awaiter=" << co_await async_read{c, 1} << "\n";
+    std::cout << "task=" << co_await g(c) << "\n";
+    co_await e();
     std::cout << "f end\n";
 }
 int main() {
@@ -177,9 +201,9 @@ int main() {
         t.start();
 
         context.complete(1, "first line");
-        std::cout << "back in main\n";
         context.complete(1, "second line");
-        context.complete(1, "third line");
+
+        t.value();
     }
     catch (std::exception const& ex) {
         std::cout << "ERROR: " << ex.what() << "\n";
