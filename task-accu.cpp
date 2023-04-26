@@ -29,6 +29,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <list>
 #include <optional>
 #include <stdexcept>
@@ -70,24 +71,25 @@ struct is_awaiter_test {
 
 template <typename T>
 concept is_awaiter
-    = requires() { [](T t)->is_awaiter_test { co_await t; }; }
+    = std::is_class_v<T>
+    && requires() { [](T t)->is_awaiter_test { co_await t; }; }
     ;
+
+template <typename V>
+struct task_base {
+    std::optional<V> v;
+    void return_value(auto&& r) { v = r; }
+    V value() { return *v; }
+};
+template <>
+struct task_base<void> {
+    void return_void() {}
+    void value() {}
+};
 
 template <typename R = void>
 struct task {
-    template <typename V>
-    struct base {
-        std::optional<V> v;
-        void return_value(auto&& r) { v = r; }
-        V value() { return *v; }
-    };
-    template <>
-    struct base<void> {
-        void return_void() {}
-        void value() {}
-    };
-
-    struct promise_type: base<R> {
+    struct promise_type: task_base<R> {
         std::coroutine_handle<> continuation{std::noop_coroutine()};
         std::exception_ptr error{};
         // track t{"****  task"};
@@ -96,7 +98,7 @@ struct task {
             if (error) {
                 std::rethrow_exception(error);
             }
-            return base<R>::value();
+            return task_base<R>::value();
         }
 
         struct final_awaiter: std::suspend_always {
@@ -161,8 +163,9 @@ struct async_read {
     io& context;
     int fd;
     std::string value{};
+    async_read(io& context, int fd): context(context), fd(fd) {}
     constexpr bool await_ready() const { return false; }
-    constexpr void await_suspend(std::coroutine_handle<> h) {
+    void await_suspend(std::coroutine_handle<> h) {
         context.submit(fd, [this, h](std::string const& line) {
             value = line;
             h.resume();
