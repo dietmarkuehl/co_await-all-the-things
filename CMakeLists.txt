@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.12.0)
 project(accu-2023 VERSION 1.0.0)
 include(CheckIncludeFile)
 
-set(POSTGRESQL /usr/local/pgsql)
-include_directories(${POSTGRESQL}/include)
-link_directories(${POSTGRESQL}/lib)
-
 set(CMAKE_CXX_STANDARD 20)
 set(SANITIZE_RECOVER -fno-sanitize-recover)
 set(SANITIZE -fsanitize=address)
@@ -31,5 +27,4 @@ list(APPEND DEMOS
 
 foreach(demo ${DEMOS})
     add_executable(${demo} ${demo}.cpp)
-    target_link_libraries(${demo} pq)
 endforeach()

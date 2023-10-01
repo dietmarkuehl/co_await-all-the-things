@@ -1,6 +1,4 @@
 NAME     = task-accu
-CXX      = clang++ 
-CC       = $(CXX)
 CXXFLAGS = -W -Wall -g -std=c++20 -O2
 
 .PHONY: default clean run
